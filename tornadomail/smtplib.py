@@ -228,7 +228,7 @@ class SMTP:
     does_esmtp = 0
 
     def __init__(self, host, port=0, local_hostname=None,
-                 timeout=socket._GLOBAL_DEFAULT_TIMEOUT):
+                 timeout=socket._GLOBAL_DEFAULT_TIMEOUT, proxy_host=None, proxy_port=None):
         """Initialize a new instance.
 
         If specified, `host' is the name of the remote host to which to
@@ -243,6 +243,8 @@ class SMTP:
         self.esmtp_features = {}
         self.default_port = SMTP_PORT
         self.local_hostname = local_hostname or 'localhost'
+        self.proxy_host = proxy_host
+        self.proxy_port = proxy_port
         #if host:
         #    (code, msg) = self.connect(host, port)
         #    if code != 220:
@@ -256,6 +258,35 @@ class SMTP:
 
         """
         self.debuglevel = debuglevel
+    
+    def _get_socket2(self, port, host, timeout):
+        # sync get proxy connect
+        if hasattr(self, '__get_socket'):
+            return self.__get_socket
+        if self.debuglevel > 0: print>>stderr, 'connect:', (host, port)
+        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM, 0)
+        #s = socket.create_connection(("10.0.1.62", 3128), timeout)
+        s.connect((self.proxy_host, self.proxy_port))
+
+        fp = s.makefile("r+")
+        # # _send_str = "CONNECT %s:%s HTTP/1.1\r\n\r\nhost: %s\r\n\r\n" % (host, port, host)
+        # _send_str = "CONNECT %s:%s HTTP/1.1\r\n\r\nhost: %s\r\n\r\nProxy-Authorization: guest idealsee2016\r\n\r\n" % (self.proxy_host, self.proxy_port, self.proxy_host)
+        # _send_str = _send_str.encode("UTF-8")
+        # fp.write(_send_str)
+        # fp.flush()
+
+        # fp = s.makefile("r+")
+        _send_str = "CONNECT %s:%s HTTP/1.1\r\n\r\nhost: %s\r\n\r\n" % (host, port, host)
+        _send_str = _send_str.encode("UTF-8")
+        fp.write(_send_str)
+        fp.flush()
+
+        status_line = fp.readline().rstrip("\r\n")
+        if 'HTTP' in status_line and ('200' not in status_line):
+            raise SMTPConnectError(200,'proxy(%s, %s) connect to (%s, %s) failed, status_line is : %s'%(self.proxy_host, self.proxy_port, host, port, status_line))
+        stream = iostream.IOStream(s)
+        self.__get_socket = stream
+        return stream
                     
     def _get_socket(self, port, host, timeout, callback):
         # This makes it simpler for SMTP_SSL to use the SMTP connect code
@@ -305,10 +336,13 @@ class SMTP:
                 except ValueError:
                     raise socket.error, "nonnumeric port"
         if not port: port = self.default_port
-        result = yield gen.Task(
-            self._get_socket, port, host, self.timeout
-        )
-        self.sock = result.kwargs['socket']
+        if self.proxy_host and self.proxy_port:
+            self.sock = self._get_socket2(port, host, self.timeout)
+        else:
+            result = yield gen.Task(
+                self._get_socket, port, host, self.timeout
+            )
+            self.sock = result.kwargs['socket']
         if self.debuglevel > 0: print>>stderr, 'connect:', (host, port)
         result = yield gen.Task(self.getreply)
         (code, msg) = result.args

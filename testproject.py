@@ -22,7 +22,10 @@ class Application(tornado.web.Application):
     def mail_connection(self):
         return EmailBackend(
             'smtp.gmail.com', 587, '<your google email>', '<your google password>',
-            True
+            True,
+            #proxy_host="proxy_host",
+            #proxy_port=proxy_port,
+
         )
 
 class MainHandler(tornado.web.RequestHandler):

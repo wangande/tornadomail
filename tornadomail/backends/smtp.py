@@ -26,6 +26,8 @@ class EmailBackend(BaseEmailBackend):
             self.use_tls = use_tls
         self.connection = None
         self.template_loader = kwargs.get('template_loader', None)
+        self.proxy_host = kwargs.get('proxy_host', None)
+        self.proxy_port = kwargs.get('proxy_port', None)
 
     @gen.engine
     def open(self, callback):
@@ -40,7 +42,7 @@ class EmailBackend(BaseEmailBackend):
             # If local_hostname is not specified, socket.getfqdn() gets used.
             # For performance, we use the cached FQDN for local_hostname.
             self.connection = smtplib.SMTP(self.host, self.port,
-                                           local_hostname=DNS_NAME.get_fqdn())
+                                           local_hostname=DNS_NAME.get_fqdn(), proxy_host=self.proxy_host, proxy_port=self.proxy_port)
             yield gen.Task(self.connection.connect, self.host, self.port)
             if self.use_tls:
                 yield gen.Task(self.connection.ehlo)
@@ -53,12 +55,11 @@ class EmailBackend(BaseEmailBackend):
             if not self.fail_silently:
                 raise
 
-    @gen.engine
-    def close(self,callback):
+    def close(self):
         """Closes the connection to the email server."""
         try:
             try:
-                yield gen.Task(self.connection.quit)
+                self.connection.quit()
             except socket.sslerror:
                 # This happens when calling quit() on a TLS connection
                 # sometimes.
@@ -69,7 +70,6 @@ class EmailBackend(BaseEmailBackend):
                 raise
         finally:
             self.connection = None
-            callback(None)
 
     @gen.engine
     def send_messages(self, email_messages, callback=None):
@@ -91,7 +91,7 @@ class EmailBackend(BaseEmailBackend):
             if sent:
                 num_sent += 1
         if new_conn_created:
-            yield gen.Task(self.close)
+            self.close()
         if callback:
             callback(num_sent)
 
